@@ -1,0 +1,26 @@
+{
+  "name": "scrapefast",
+  "version": "1.0.0",
+  "description": "",
+  "author": "Shrey Vijayvargiya",
+  "homepage": "https://github.com/shreyvijayvargiya/scrapefast#readme",
+  "bugs": {
+    "url": "https://github.com/shreyvijayvargiya/scrapefast/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shreyvijayvargiya/scrapefast.git"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.14",
+    "hono": "^4.12.12",
+    "jsdom": "^29.0.2",
+    "turndown": "^7.2.4"
+  }
+}
