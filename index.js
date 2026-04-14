@@ -6,6 +6,7 @@
  * Env:
  *   BROWSER_POOL_SIZE=2
  *   CHROME_PATH=/path/to/chrome   (optional; on macOS/Windows we auto-detect Chrome if unset)
+ *   NAV_TIMEOUT_MS=90000          (default navigation / page wait timeout; override per request with JSON `timeout`)
  */
 import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
@@ -15,6 +16,11 @@ import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
 
 const POOL_SIZE = Math.max(1, parseInt(process.env.BROWSER_POOL_SIZE || "2", 10) || 2);
+
+const DEFAULT_NAV_TIMEOUT_MS = (() => {
+	const n = parseInt(process.env.NAV_TIMEOUT_MS || "90000", 10);
+	return Number.isFinite(n) && n >= 1000 ? n : 90_000;
+})();
 
 const CHROME_ARGS = [
 	"--no-sandbox",
@@ -310,7 +316,7 @@ async function setupPage(page, { timeout, viewport }) {
 async function scrapeUrl(url, options = {}) {
 	const {
 		waitForSelector = null,
-		timeout = 30_000,
+		timeout = DEFAULT_NAV_TIMEOUT_MS,
 		includeSemanticContent = true,
 		includeImages = true,
 		includeLinks = true,
@@ -405,7 +411,7 @@ async function scrapeUrl(url, options = {}) {
 
 async function screenshotUrl(url, options = {}) {
 	const {
-		timeout = 30_000,
+		timeout = DEFAULT_NAV_TIMEOUT_MS,
 		fullPage = true,
 		waitForSelector = null,
 	} = options;
@@ -463,7 +469,7 @@ app.post("/scrape", async (c) => {
 	try {
 		const result = await scrapeUrl(url, {
 			waitForSelector: body.waitForSelector ?? null,
-			timeout: Number(body.timeout) || 30_000,
+			timeout: Number(body.timeout) || DEFAULT_NAV_TIMEOUT_MS,
 			includeSemanticContent: body.includeSemanticContent !== false,
 			includeImages: body.includeImages !== false,
 			includeLinks: body.includeLinks !== false,
@@ -509,7 +515,7 @@ app.post("/screenshot", async (c) => {
 
 	try {
 		const b64 = await screenshotUrl(url, {
-			timeout: Number(body.timeout) || 30_000,
+			timeout: Number(body.timeout) || DEFAULT_NAV_TIMEOUT_MS,
 			fullPage: body.fullPage !== false,
 			waitForSelector: body.waitForSelector ?? null,
 		});
