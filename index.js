@@ -5,8 +5,10 @@
  *
  * Env:
  *   BROWSER_POOL_SIZE=2
- *   CHROME_PATH=/path/to/chrome   (local dev; optional if @sparticuz/chromium works)
+ *   CHROME_PATH=/path/to/chrome   (optional; on macOS/Windows we auto-detect Chrome if unset)
  */
+import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { JSDOM } from "jsdom";
@@ -23,6 +25,89 @@ const CHROME_ARGS = [
 	"--no-zygote",
 	"--single-process",
 ];
+
+const MACOS_CHROME_CANDIDATES = [
+	"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+	"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+	"/Applications/Chromium.app/Contents/MacOS/Chromium",
+	"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+];
+
+const LINUX_SYSTEM_CHROME_CANDIDATES = [
+	"/usr/bin/google-chrome-stable",
+	"/usr/bin/google-chrome",
+	"/usr/bin/chromium",
+	"/usr/bin/chromium-browser",
+];
+
+async function pathExecutable(p) {
+	if (!p) return false;
+	try {
+		const mode =
+			process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK;
+		await fs.access(p, mode);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * @sparticuz/chromium ships a Linux binary for Lambda; on macOS/Windows that path is not runnable (spawn ENOEXEC).
+ * Prefer system Chrome when CHROME_PATH is unset.
+ */
+async function resolveChromeLaunchConfig() {
+	const fromEnv = process.env.CHROME_PATH?.trim();
+	if (fromEnv) {
+		if (!(await pathExecutable(fromEnv))) {
+			throw new Error(`CHROME_PATH is set but not executable: ${fromEnv}`);
+		}
+		return { executablePath: fromEnv, args: CHROME_ARGS };
+	}
+
+	if (process.platform === "darwin") {
+		for (const p of MACOS_CHROME_CANDIDATES) {
+			if (await pathExecutable(p)) {
+				return { executablePath: p, args: CHROME_ARGS };
+			}
+		}
+		throw new Error(
+			"Chrome not found. Install Google Chrome or set CHROME_PATH to your Chrome/Chromium binary.",
+		);
+	}
+
+	if (process.platform === "win32") {
+		const candidates = [
+			process.env.PROGRAMFILES &&
+				`${process.env.PROGRAMFILES}\\Google\\Chrome\\Application\\chrome.exe`,
+			process.env["PROGRAMFILES(X86)"] &&
+				`${process.env["PROGRAMFILES(X86)"]}\\Google\\Chrome\\Application\\chrome.exe`,
+			process.env.LOCALAPPDATA &&
+				`${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`,
+		].filter(Boolean);
+		for (const p of candidates) {
+			if (await pathExecutable(p)) {
+				return { executablePath: p, args: CHROME_ARGS };
+			}
+		}
+		throw new Error(
+			"Chrome not found. Install Google Chrome or set CHROME_PATH to chrome.exe.",
+		);
+	}
+
+	for (const p of LINUX_SYSTEM_CHROME_CANDIDATES) {
+		if (await pathExecutable(p)) {
+			return { executablePath: p, args: CHROME_ARGS };
+		}
+	}
+
+	const chromium = (await import("@sparticuz/chromium")).default;
+	return {
+		executablePath: await chromium.executablePath(),
+		args: [...chromium.args, "--disable-web-security"],
+		ignoreDefaultArgs: ["--disable-extensions"],
+	};
+}
 
 function isValidHttpUrl(s) {
 	try {
@@ -71,29 +156,16 @@ class BrowserPool {
 
 	async _launch() {
 		const puppeteer = (await import("puppeteer-core")).default;
-		const chromium = (await import("@sparticuz/chromium")).default;
-
-		const chromePath = process.env.CHROME_PATH?.trim();
-		if (chromePath) {
-			return puppeteer.launch({
-				headless: true,
-				executablePath: chromePath,
-				args: CHROME_ARGS,
-			});
+		const cfg = await resolveChromeLaunchConfig();
+		const launchOpts = {
+			headless: true,
+			executablePath: cfg.executablePath,
+			args: cfg.args,
+		};
+		if (cfg.ignoreDefaultArgs) {
+			launchOpts.ignoreDefaultArgs = cfg.ignoreDefaultArgs;
 		}
-		try {
-			const executablePath = await chromium.executablePath();
-			return puppeteer.launch({
-				headless: true,
-				executablePath,
-				args: [...chromium.args, "--disable-web-security"],
-				ignoreDefaultArgs: ["--disable-extensions"],
-			});
-		} catch {
-			throw new Error(
-				"Could not launch Chrome. Set CHROME_PATH to your Chrome/Chromium binary.",
-			);
-		}
+		return puppeteer.launch(launchOpts);
 	}
 
 	async initialise() {
